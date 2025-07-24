@@ -655,12 +655,56 @@
             return faces;
         }
 
+        function addArcText(svg, textContent, options) {
+            const {
+                cx, cy, radius,
+                startAngle = 0, endAngle = 180,
+                fontSize = '20', fontFamily, fill = 'black'
+            } = options;
+
+            // 计算圆弧路径
+            const startRad = (startAngle - 90) * Math.PI / 180;
+            const endRad = (endAngle - 90) * Math.PI / 180;
+
+            const startX = cx + radius * Math.cos(startRad);
+            const startY = cy + radius * Math.sin(startRad);
+            const endX = cx + radius * Math.cos(endRad);
+            const endY = cy + radius * Math.sin(endRad);
+
+            const largeArcFlag = endAngle - startAngle <= 180 ? 0 : 1;
+
+            // 创建路径
+            const pathId = 'arcPath-' + Math.random().toString(36).substr(2, 9);
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('id', pathId);
+            path.setAttribute('d', `M${startX},${startY} A${radius},${radius} 0 ${largeArcFlag},1 ${endX},${endY}`);
+            path.setAttribute('fill', 'none');
+            svg.appendChild(path);
+
+            // 创建文本
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('font-size', fontSize);
+            text.setAttribute('font-family', fontFamily);
+            text.setAttribute('fill', fill);
+
+            const textPath = document.createElementNS('http://www.w3.org/2000/svg', 'textPath');
+            textPath.setAttribute('href', '#' + pathId);
+            textPath.setAttribute('startOffset', '50%');
+            textPath.setAttribute('text-anchor', 'middle');
+            textPath.textContent = textContent;
+
+            text.appendChild(textPath);
+            svg.appendChild(text);
+
+            return { path, text };
+        }
+
         var graphSvgs = [];  // 关系图中的晶体小图
         var graphSvgRenders = [];  // 关系图中的晶体小图重绘函数
 
         const outerRadiusRelative = 0.7;  // 关系图尺寸系数
 
-        function updateGraph() {
+        function updateGraph() {  // 更新关系图
             const svg = document.getElementById('graph');
             svg.innerHTML = '';
             // 获取SVG的尺寸和中心点
@@ -744,6 +788,21 @@
                     svg.appendChild(path);
                 }
             }
+
+            // 标准形态名称
+            ['Octahedrons', 'Pyritohedrons', 'Cube'].forEach((text, i) => {
+                const circle = circles[i * 4 + 1];
+                addArcText(svg, text, {
+                    cx: circle.x,
+                    cy: circle.y,
+                    radius: circle.r + radius * 0.025,
+                    startAngle: circle.h * 360 - 90,
+                    endAngle: circle.h * 360 + 90,
+                    fontSize: radius * 0.06,
+                    fontFamily: '"Comic Sans MS", cursive',  // 网上说用这个字体会被设计界嘲笑😂
+                    fill: 'black'
+                });
+            });
 
             circles.forEach(e => {
                 // 创建圆
