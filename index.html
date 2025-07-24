@@ -71,6 +71,7 @@
 
         .split-container.vertical .part-2 {
             order: 1;
+            position: relative;
         }
 
         /* 方形，填满半边 */
@@ -90,6 +91,38 @@
             transform: translate(-50%, -100%);
             /* 将定位中心移到尖端 */
         }
+
+        /* 自转控制按钮样式 */
+        .rotate-button {
+            position: absolute;
+            bottom: 1em;
+            right: 1em;
+            width: 3em;
+            aspect-ratio: 1 / 1;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px solid #333;
+            /* box-shadow: 0 0 5px rgba(0, 0, 0, 0.3); */
+            box-shadow: inset 0 0 0.8em rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+
+        .rotate-button:hover {
+            transform: scale(1.05);
+        }
+
+        .rotate-button.pressed {
+            background: rgba(200, 230, 255, 0.8);
+        }
+
+        .rotate-button svg {
+            width: 60%;
+            height: 60%;
+        }
     </style>
 </head>
 
@@ -102,10 +135,17 @@
         </div>
         <div class="split-part part-2">
             <svg id="scene-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+            <!-- 添加自转控制按钮 -->
+            <div class="rotate-button pressed" id="rotate-button">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                        d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
+                </svg>
+            </div>
         </div>
     </div>
 
-    <svg id="pin" width="calc(min(100vmin, 100vmax / 2) * 0.13)" viewBox="-5 -2 40 45">
+    <svg id="pin" width="calc(min(100vmin, 100vmax / 2) * 0.13)" viewBox="-5 -2 40 45.5">
         <!-- 水滴形大头针 -->
         <path
             d="M15 0C6.716 0 0 6.716 0 15c0 5.245 3.33 12.306 15 27 11.67-14.694 15-21.755 15-27 0-8.284-6.716-15-15-15z"
@@ -177,7 +217,7 @@
 
         function sort_face_points(vertices, face, normal) {  // 排序一个面的若干个顶点使得它们围成一个凸多边形且法向正确。这个函数有轻微的bug，不过发生的概率很低
             const result = [face[0], face[1]];
-            
+
             for (let i = 2; i < face.length; i++) {
                 let j;
                 for (j = 0; j < result.length; j++) {
@@ -542,11 +582,11 @@
                 });
             }
 
-            return { render, updateFaces };
+            return { camera, render, updateFaces };
         }
 
         const faces = coordinatesToGeometry(0, 0, 'rgba(230, 220, 120, 0.8)');  // 初始几何体
-        const { render, updateFaces } = generateScene(document.getElementById('scene-svg'), faces, true, 3, 35, 4, 0, 0);
+        const { camera, render, updateFaces } = generateScene(document.getElementById('scene-svg'), faces, true, 3, 35, 4, 0, 0);
 
         // 初始渲染
         render();
@@ -755,7 +795,7 @@
                         point.z /= rMean;
                     }));
 
-                    const { render, updateFaces } = generateScene(
+                    const { camera, render, updateFaces } = generateScene(
                         graphSvgs[i],
                         faces,
                         false,  // 禁用鼠标交互
@@ -773,6 +813,36 @@
             }
 
         };
+    </script>
+
+    <!-- 旋转按钮 -->
+    <script>
+        // 自转控制
+        let isRotating = true;
+        let lastTime = 0;
+        let rotationSpeed = 0.0005; // 旋转速度
+
+        function animate(time) {
+            if (!lastTime) lastTime = time;
+            const deltaTime = time - lastTime;
+            lastTime = time;
+
+            if (isRotating) {
+                camera.phi += rotationSpeed * deltaTime;
+                render();
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        requestAnimationFrame(animate);
+
+        // 按钮控制
+        const rotateButton = document.getElementById('rotate-button');
+        rotateButton.addEventListener('click', function () {
+            isRotating = !isRotating;
+            rotateButton.classList.toggle('pressed');
+        });
     </script>
 
     <!-- 图钉 -->
