@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D SVG Cube</title>
+    <style>
+        body {
+            overflow: hidden;
+            height: 100vh;
+            background: #f0f0f0;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <svg id="scene-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+    <script>
+        function compute_face_center(face) {  // 计算一个面的中心并将结果记录在面数据字典中
+            const center = { x: 0, y: 0, z: 0 };
+            face.points.forEach(point => {
+                center.x += point.x;
+                center.y += point.y;
+                center.z += point.z;
+            });
+            center.x /= face.points.length;
+            center.y /= face.points.length;
+            center.z /= face.points.length;
+            face.centerPoint = center;
+        }
+
+        function subtractVectors(u, v) {
+            return [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+        }
+
+        function dotProduct(u, v) {
+            return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        }
+
+        function vectorLength(v) {
+            return dotProduct(v, v) ** 0.5;
+        }
+
+        function crossProduct(u, v) {
+            return [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0]
+            ];
+        }
+
+        function scaleVectors(vertors, scale) {  // 缩放一组向量
+            return vertors.map(v => v.map(a => a * scale));
+        }
+
+        function is_triangle_normal_correct(a, b, c, normal) {
+            const u = subtractVectors(b, a);
+            const v = subtractVectors(c, a);
+            return dotProduct(normal, crossProduct(u, v)) >= 0;
+        }
+
+        function mod(a, b) {
+            while (a < 0)
+                a += b;
+            return a % b;
+        }
+
+        function sort_face_points(vertices, face, normal) {
+            const result = [face[0], face[1]];
+            for (let i = 2; i < face.length; i++) {
+                let j;
+                for (j = 0; j < result.length; j++) {
+                    if (!is_triangle_normal_correct(
+                        vertices[result[mod(j - 2, result.length)]],
+                        vertices[result[mod(j - 1, result.length)]],
+                        vertices[face[i]],
+                        normal
+                    ))
+                        continue;
+                    if (!is_triangle_normal_correct(
+                        vertices[result[mod(j - 1, result.length)]],
+                        vertices[face[i]],
+                        vertices[result[mod(j, result.length)]],
+                        normal
+                    ))
+                        continue;
+                    if (!is_triangle_normal_correct(
+                        vertices[face[i]],
+                        vertices[result[mod(j, result.length)]],
+                        vertices[result[mod(j + 1, result.length)]],
+                        normal
+                    ))
+                        continue;
+                    break;
+                }
+                result.splice(j, 0, face[i]);
+            }
+            return result;
+        }
+
+        /**
+        * 计算由多个平面切割形成的包含原点的凸多面体
+        * @param {Array} planes - 平面数组，每个平面表示为 {normal: [x,y,z], point: [x,y,z]}
+        * @returns {Object} - 返回多面体对象，包含顶点和面信息
+        */
+        function calculateConvexPolyhedron(planes) {
+            // 验证输入
+            if (!planes || planes.length < 4) {
+                throw new Error("至少需要4个平面才能形成一个三维多面体");
+            }
+
+            // 将平面表示为Ax + By + Cz + D = 0的形式
+            const normalizedPlanes = planes.map(plane => {
+                const [A, B, C] = plane.normal;
+                const [x0, y0, z0] = plane.point;
+                const D = -(A * x0 + B * y0 + C * z0);
+                const length = Math.sqrt(A * A + B * B + C * C);
+                return {
+                    A: A / length,
+                    B: B / length,
+                    C: C / length,
+                    D: D / length
+                };
+            });
+
+            // 计算所有平面的交点（候选顶点）
+            const vertices = [];
+            for (let i = 0; i < normalizedPlanes.length; i++) {
+                for (let j = i + 1; j < normalizedPlanes.length; j++) {
+                    for (let k = j + 1; k < normalizedPlanes.length; k++) {
+                        const p1 = normalizedPlanes[i];
+                        const p2 = normalizedPlanes[j];
+                        const p3 = normalizedPlanes[k];
+
+                        // 解三元一次方程组求交点
+                        const denominator = p1.A * (p2.B * p3.C - p3.B * p2.C) -
+                            p1.B * (p2.A * p3.C - p3.A * p2.C) +
+                            p1.C * (p2.A * p3.B - p3.A * p2.B);
+
+                        if (Math.abs(denominator) < 1e-10) continue; // 平面平行或共线
+
+                        const D1 = -p1.D;
+                        const D2 = -p2.D;
+                        const D3 = -p3.D;
+
+                        const x = (D1 * (p2.B * p3.C - p3.B * p2.C) -
+                            p1.B * (D2 * p3.C - D3 * p2.C) +
+                            p1.C * (D2 * p3.B - D3 * p2.B)) / denominator;
+
+                        const y = (p1.A * (D2 * p3.C - D3 * p2.C) -
+                            D1 * (p2.A * p3.C - p3.A * p2.C) +
+                            p1.C * (p2.A * D3 - p3.A * D2)) / denominator;
+
+                        const z = (p1.A * (p2.B * D3 - p3.B * D2) -
+                            p1.B * (p2.A * D3 - p3.A * D2) +
+                            D1 * (p2.A * p3.B - p3.A * p2.B)) / denominator;
+
+                        // 检查该点是否在所有其他平面的"正面"（即满足Ax + By + Cz + D <= 0）
+                        let isValid = true;
+                        for (let m = 0; m < normalizedPlanes.length; m++) {
+                            if (m === i || m === j || m === k) continue;
+                            const p = normalizedPlanes[m];
+                            const distance = p.A * x + p.B * y + p.C * z + p.D;
+                            if (distance > 1e-10) {
+                                isValid = false;
+                                break;
+                            }
+                        }
+
+                        if (isValid) {
+                            vertices.push({
+                                point: [x, y, z],
+                                faces: [i, j, k]
+                            });
+                        }
+                    }
+                }
+            }
+
+            // 去除重复顶点
+            const uniqueVertices = [];
+            const vertexMap = {};
+            vertices.forEach(v => {
+                const key = v.point.map(n => n.toFixed(6)).join(',');
+                if (!(key in vertexMap)) {
+                    uniqueVertices.push(v);
+                    vertexMap[key] = v;
+                }
+                else {
+                    vertexMap[key].faces.push(...v.faces)
+                }
+            });
+
+            // 收集与每个边关联的顶点的编号
+            const uniqueVerticesPure = uniqueVertices.map(v => v.point);
+            const faces = [];
+            for (let i = 0; i < planes.length; i++) {
+                let face = [];
+                uniqueVertices.forEach((p, j) => {
+                    if (p.faces.includes(i))
+                        face.push(j);
+                });
+
+                if (face.length <= 2)
+                    continue;
+
+                // 为点排序
+                face = sort_face_points(uniqueVerticesPure, face, planes[i].normal);
+
+                faces.push(face);
+            }
+
+            return { vertices: uniqueVerticesPure, faces };
+        }
+
+        function dictVectorToList(v) {
+            return [v.x, v.y, v.z];
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const svg = document.getElementById('scene-svg');
+            const width = svg.clientWidth;
+            const height = svg.clientHeight;
+
+            // 摄像机参数（球坐标系）
+            let camera = {
+                theta: 0,  // 水平旋转角度 (绕Y轴)
+                phi: 0,  // 垂直旋转角度 (绕X轴)
+                distance: 8, // 摄像机距离
+                angle: 45 * Math.PI / 180  // 摄像机（在宽度和高度中较大的一个上的）视角
+            };
+
+            const phi = (1 + Math.sqrt(5)) / 2;  // 黄金比例 1.618
+            const planeNormals = {
+                '100': [  // 正方体
+                    [1, 0, 0], [-1, 0, 0],
+                    [0, 1, 0], [0, -1, 0],
+                    [0, 0, 1], [0, 0, -1]
+                ],
+                '111': [  // 正八面体
+                    [1, 1, 1],
+                    [1, 1, -1],
+                    [1, -1, 1],
+                    [1, -1, -1],
+                    [-1, 1, 1],
+                    [-1, 1, -1],
+                    [-1, -1, 1],
+                    [-1, -1, -1]
+                ],
+                '210': [  // 正十二面体
+                    [0, 1, phi], [0, 1, -phi], [0, -1, phi], [0, -1, -phi],
+                    [1, phi, 0], [1, -phi, 0], [-1, phi, 0], [-1, -phi, 0],
+                    [phi, 0, 1], [phi, 0, -1], [-phi, 0, 1], [-phi, 0, -1]
+                ]
+            };
+            Object.keys(planeNormals).forEach(key => {  // 归一化
+                const length = vectorLength(planeNormals[key][0]);
+                planeNormals[key] = scaleVectors(planeNormals[key], 1 / length);
+            });
+
+            let planes = [];
+            planes = planes.concat(scaleVectors(planeNormals['100'], 1));
+            planes = planes.concat(scaleVectors(planeNormals['111'], 1));
+            planes = planes.concat(scaleVectors(planeNormals['210'], 1));
+            planes = planes.map(point => ({normal: point, point}));
+
+            let { vertices, faces } = calculateConvexPolyhedron(planes);
+            faces = faces.map(face => {
+                return {
+                    points: face.map(i => ({ x: vertices[i][0], y: vertices[i][1], z: vertices[i][2] })),
+                    color: 'rgba(255, 255, 0, 0.8)'
+                };
+            });
+            faces.forEach(compute_face_center);  // 计算每个面的中心并将结果记录在面数据字典中
+
+            // 绕X轴旋转点 (phi)
+            function rotatePhi(x, y, z, angle) {
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+                return {
+                    x: x * cos - y * sin,
+                    y: x * sin + y * cos,
+                    z: z
+                };
+            }
+
+            // 绕Y轴旋转点 (theta)
+            function rotateTheta(x, y, z, angle) {
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+                return {
+                    x: x * cos - z * sin,
+                    y: y,
+                    z: x * sin + z * cos
+                };
+            }
+
+            // 透视投影
+            function project(x, y, z) {
+                // 计算物体相对于摄像机的位置
+                const relX = x - camera.distance;
+
+                // 透视投影
+                const scale = Math.max(width, height) / 2 / Math.tan(camera.angle / 2) / relX;
+                return {
+                    x: -y * scale + width / 2,
+                    y: z * scale + height / 2,
+                    z: relX
+                };
+            }
+
+            // 旋转 + 透视投影
+            function processPoint(p) {
+                let rotated = rotatePhi(p.x, p.y, p.z, camera.phi);
+                rotated = rotateTheta(rotated.x, rotated.y, rotated.z, camera.theta);
+                const rojected = project(rotated.x, rotated.y, rotated.z)
+                return rojected;
+            }
+
+            // 渲染
+            function render() {
+                // 清空SVG
+                svg.innerHTML = '';  // 清空
+
+                // 处理每个面的顶点
+                const processedFaces = faces.map(face => {
+                    const projectedPoints = face.points.map(processPoint);
+
+                    // 计算中心点Z坐标 (用于排序)
+                    let centerZ = processPoint(face.centerPoint).z;
+                    if (is_triangle_normal_correct(dictVectorToList(projectedPoints[0]), dictVectorToList(projectedPoints[1]), dictVectorToList(projectedPoints[2]), [0, 0, 1])) {
+                        centerZ -= 100;  // 该面背对相机，这种情况下将该面的深度手动设深以避免错误的遮挡关系
+                    }
+
+                    return {
+                        color: face.color,
+                        points: projectedPoints,
+                        centerZ: centerZ
+                    };
+                });
+
+                // 按中心点Z坐标排序 (从远到近)
+                processedFaces.sort((a, b) => a.centerZ - b.centerZ);
+
+                // 绘制每个面
+                processedFaces.forEach(face => {
+                    const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+
+                    // 构建点字符串
+                    let pointsStr = '';
+                    face.points.forEach(p => {
+                        pointsStr += `${p.x},${p.y} `;
+                    });
+                    polygon.setAttribute("points", pointsStr.trim());
+
+                    polygon.setAttribute("fill", face.color);
+                    polygon.setAttribute("stroke", "#000");  // 边缘线颜色
+                    polygon.setAttribute("stroke-width", "10");  // 线宽
+                    polygon.setAttribute("stroke-linecap", "round");  // 端点圆形
+                    polygon.setAttribute("stroke-linejoin", "round");  // 拐角圆形
+
+                    svg.appendChild(polygon);
+                });
+            }
+
+            // 鼠标拖动旋转
+            let isDragging = false;
+
+            svg.addEventListener('mousedown', (e) => {
+                isDragging = true;
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                camera.phi += e.movementX * 0.01;
+                camera.theta -= e.movementY * 0.01;
+                camera.theta = Math.min(Math.PI / 2, Math.max(-Math.PI / 2, camera.theta));  // 限制垂直角度
+
+                render();
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            svg.addEventListener('wheel', (e) => {
+                camera.distance *= Math.exp(e.deltaY * 0.001);  // 根据滚轮方向调整相机距离
+
+                render();
+            });
+
+            // 初始渲染
+            render();
+        });
+    </script>
+</body>
+
+</html>
