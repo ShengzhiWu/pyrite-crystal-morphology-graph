@@ -92,11 +92,9 @@
             /* 将定位中心移到尖端 */
         }
 
-        /* 自转控制按钮样式 */
-        .rotate-button {
+        /* 按钮 */
+        .button {
             position: absolute;
-            bottom: 1em;
-            right: 1em;
             width: 3em;
             aspect-ratio: 1 / 1;
             border-radius: 50%;
@@ -111,15 +109,21 @@
             transition: all 0.2s ease;
         }
 
-        .rotate-button:hover {
+        .button:hover {
             transform: scale(1.05);
         }
 
-        .rotate-button.pressed {
+        .button.pressed {
             background: rgba(200, 230, 255, 0.8);
         }
 
-        .rotate-button svg {
+        /* 按下的瞬间变成高亮色 */
+        #save-button:active {
+            background: rgba(200, 230, 255, 0.8);
+            transition: background-color 0s ease;
+        }
+
+        .button svg {
             width: 60%;
             height: 60%;
         }
@@ -135,12 +139,18 @@
         </div>
         <div class="split-part part-2">
             <svg id="scene-svg" xmlns="http://www.w3.org/2000/svg"></svg>
-            <!-- 添加自转控制按钮 -->
-            <div class="rotate-button pressed" id="rotate-button">
+
+            <!-- 自转控制按钮 -->
+            <div class="button pressed" id="rotate-button" style="bottom: 1em; right: 5em;">
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path
                         d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
                 </svg>
+            </div>
+
+            <!-- 保存模型按钮 -->
+            <div class="button" id="save-button" style="bottom: 1em; right: 1em;">
+                OBJ
             </div>
         </div>
     </div>
@@ -426,22 +436,15 @@
     <!-- 3d 与交互部分代码 -->
     <script>
         function getPolygon(distances, color) {
+            // 构造平面
             let planes = [];
             Object.keys(distances).forEach(key => {
                 planes = planes.concat(scaleVectors(planeNormals[key], distances[key]));
             });
             planes = planes.map(point => ({ normal: point, point }));
 
-            let { vertices, faces } = calculateConvexPolyhedron(planes);
-            faces = faces.map(face => {
-                return {
-                    points: face.map(i => ({ x: vertices[i][0], y: vertices[i][1], z: vertices[i][2] })),
-                    color  // 晶体颜色
-                };
-            });
-            faces.forEach(compute_face_center);  // 计算每个面的中心并将结果记录在面数据字典中
-
-            return faces;
+            // 计算平面包围的多面体
+            return calculateConvexPolyhedron(planes);
         }
 
         // 绕X轴旋转点 (phi)
@@ -585,7 +588,7 @@
             return { camera, render, updateFaces };
         }
 
-        const faces = coordinatesToGeometry(0, 0, 'rgba(230, 220, 120, 0.8)');  // 初始几何体
+        const { faces, rawGeometry } = coordinatesToGeometry(0, 0, 'rgba(230, 220, 120, 0.8)');  // 初始几何体
         const { camera, render, updateFaces } = generateScene(document.getElementById('scene-svg'), faces, true, 3, 35, 4, 0, 0);
 
         // 初始渲染
@@ -646,13 +649,21 @@
         ) {
             const parameters = coordinatesToParameters(angle, r);
 
-            var faces = getPolygon({  // 各晶面指数对应的面到原点的距离
+            var { vertices, faces } = getPolygon({  // 各晶面指数对应的面到原点的距离
                 '100': parameters[0],  // 立方体
                 '111': parameters[1],  // 八面体
                 '210': parameters[2]  // 五角十二面体
             }, color);
 
-            return faces;
+            const rawGeometry = { vertices, faces };
+
+            faces = faces.map(face => ({
+                points: face.map(i => ({ x: vertices[i][0], y: vertices[i][1], z: vertices[i][2] })),
+                color  // 晶体颜色
+            }));
+            faces.forEach(compute_face_center);  // 计算每个面的中心并将结果记录在面数据字典中
+
+            return { faces, rawGeometry };
         }
 
         function addArcText(svg, textContent, options) {
@@ -830,7 +841,7 @@
                 if (initializing) {
                     constainer.appendChild(graphSvgs[i]);
 
-                    const faces = coordinatesToGeometry(circles[i].h, circles[i].s, circles[i].colorPolygon);
+                    const { faces, rawGeometry } = coordinatesToGeometry(circles[i].h, circles[i].s, circles[i].colorPolygon);
 
                     // 半径均匀化
                     let rSum = 0;
@@ -960,8 +971,7 @@
             pin.style.top = `${y}px`;
 
             const angle = Math.atan2(yRelative, xRelative);
-            const faces = coordinatesToGeometry(angle / Math.PI / 2 + 0.25, rRelative, 'rgba(230, 220, 120, 0.8)');
-            // console.log(angle / Math.PI / 2 + 0.25, rRelative);
+            const { faces, rawGeometry } = coordinatesToGeometry(angle / Math.PI / 2 + 0.25, rRelative, 'rgba(230, 220, 120, 0.8)');
             updateFaces(faces);
             render();
         }
@@ -984,6 +994,56 @@
         graphPanel.addEventListener('touchstart', movePin);
         // 移动设备支持触摸移动
         graphPanel.addEventListener('touchmove', movePin);
+    </script>
+
+    <!-- 保存为 OBJ 文件 -->
+    <script>
+        function generateOBJ(vertices, faces) {
+            let objContent = "";
+
+            // 写入顶点
+            vertices.forEach(v => {
+                objContent += `v ${v[0]} ${v[1]} ${v[2]}\n`;
+            });
+
+            // 写入面（支持任意边数的多边形）（注意顶点索引是从1开始的）
+            faces.forEach(f => {
+                objContent += `f ${f.map(i => i + 1).join(" ")}\n`;
+            });
+
+            return objContent;
+        }
+
+        function saveOBJToFile(objContent, filename) {
+            // 创建Blob对象
+            const blob = new Blob([objContent], { type: 'text/plain' });
+
+            // 创建下载链接
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+
+            // 触发点击下载
+            document.body.appendChild(link);
+            link.click();
+
+            // 清理
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            }, 100);
+        }
+
+        // 按钮控制
+        const saveButton = document.getElementById('save-button');
+        saveButton.addEventListener('click', function () {
+            const rRelative = (pinLocationRelative.x ** 2 + pinLocationRelative.y ** 2) ** 0.5;;
+            const angle = Math.atan2(pinLocationRelative.y, pinLocationRelative.x);
+            const { faces, rawGeometry } = coordinatesToGeometry(angle / Math.PI / 2 + 0.25, rRelative, '');
+            const objString = generateOBJ(rawGeometry.vertices, rawGeometry.faces);
+            saveOBJToFile(objString, 'pyrite_crystal.obj');  // 下载文件
+        });
+
     </script>
 
     <!-- 布局部分代码 -->
